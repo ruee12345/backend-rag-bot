@@ -1,0 +1,197 @@
+import os
+import pickle
+import numpy as np
+from typing import List, Dict, Any
+import voyageai
+import faiss
+from app.core.config import settings
+
+class VectorStore:
+    def __init__(self):
+        print(f"DEBUG: Initializing VectorStore with Voyage AI")
+        
+        # Initialize Voyage AI client
+        self.voyage_client = voyageai.Client(api_key="pa-iznSYTT-ntR0a_wgXP29udIem0x9WvVt0U6cKb6BAFX")
+        self.vector_store_path = settings.vector_store_path
+        self.index = None
+        self.documents = []  # Store document chunks
+        self.metadata = []   # Store metadata for each chunk
+        
+        # Create vector store directory if it doesn't exist
+        os.makedirs(self.vector_store_path, exist_ok=True)
+        print(f"DEBUG: Vector store path: {self.vector_store_path}")
+        
+        # Try to load existing index
+        self.load_index()
+    
+    def create_embeddings(self, texts: List[str]) -> np.ndarray:
+        """Create embeddings for list of texts using Voyage AI"""
+        print(f"DEBUG: Creating embeddings for {len(texts)} texts using Voyage AI")
+        
+        if not texts:
+            return np.array([])
+        
+        try:
+            # Call Voyage AI API
+            result = self.voyage_client.embed(
+                texts=texts,
+                model="voyage-3",  # Latest and best model
+                input_type="document"  # For document retrieval
+            )
+            
+            embeddings = np.array(result.embeddings)
+            print(f"DEBUG: Voyage AI embeddings shape: {embeddings.shape}")
+            return embeddings
+            
+        except Exception as e:
+            print(f"DEBUG ERROR: Voyage AI embedding failed: {e}")
+            # Fallback: return random embeddings (for testing)
+            print("DEBUG: Using random embeddings as fallback")
+            return np.random.randn(len(texts), 1024).astype(np.float32)
+    
+    def add_documents(self, documents: List[Dict[str, Any]]):
+        """Add documents to vector store"""
+        if not documents:
+            print("DEBUG: No documents to add")
+            return
+        
+        print(f"DEBUG: Adding {len(documents)} documents to vector store")
+        
+        # Extract texts
+        texts = [doc["text"] for doc in documents]
+        print(f"DEBUG: First text sample: {texts[0][:100]}...")
+        
+        # Create embeddings using Voyage AI
+        embeddings = self.create_embeddings(texts)
+        print(f"DEBUG: Created embeddings shape: {embeddings.shape}")
+        
+        # Initialize or extend FAISS index
+        if self.index is None:
+            dimension = embeddings.shape[1]
+            self.index = faiss.IndexFlatL2(dimension)
+            print(f"DEBUG: Created new FAISS index with dimension {dimension}")
+        else:
+            print(f"DEBUG: Extending existing FAISS index")
+        
+        # Add to index
+        self.index.add(embeddings)
+        print(f"DEBUG: Added embeddings to FAISS index")
+        
+        # Store documents and metadata
+        self.documents.extend(documents)
+        self.metadata.extend([{"doc_id": len(self.documents) - 1, **doc} for doc in documents])
+        print(f"DEBUG: Now have {len(self.documents)} total documents")
+        
+        # Save index
+        self.save_index()
+        print(f"DEBUG: Saved index to {self.vector_store_path}")
+    
+    def search(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
+        """Search for similar documents"""
+        print(f"DEBUG: Searching for query: '{query}'")
+        
+        if self.index is None:
+            print("DEBUG: Index is None, returning empty results")
+            return []
+        
+        if len(self.documents) == 0:
+            print("DEBUG: No documents in store, returning empty results")
+            return []
+        
+        print(f"DEBUG: Index has {self.index.ntotal} vectors, store has {len(self.documents)} documents")
+        
+        # Create query embedding using Voyage AI
+        query_embedding = self.create_embeddings([query])
+        print(f"DEBUG: Query embedding shape: {query_embedding.shape}")
+        
+        # Search
+        distances, indices = self.index.search(query_embedding, k)
+        print(f"DEBUG: Search results - distances: {distances}, indices: {indices}")
+        
+        # Prepare results
+        results = []
+        for i, (distance, idx) in enumerate(zip(distances[0], indices[0])):
+            if idx >= 0 and idx < len(self.documents):
+                results.append({
+                    "document": self.documents[idx],
+                    "metadata": self.metadata[idx],
+                    "score": float(distance),
+                    "rank": i + 1
+                })
+                print(f"DEBUG: Result {i+1}: idx={idx}, distance={distance:.4f}")
+            else:
+                print(f"DEBUG: Invalid index {idx}, skipping")
+        
+        print(f"DEBUG: Returning {len(results)} results")
+        return results
+    
+    def save_index(self):
+        """Save index to disk"""
+        if self.index is not None:
+            print(f"DEBUG: Saving index with {len(self.documents)} documents")
+            
+            # Save FAISS index
+            index_path = os.path.join(self.vector_store_path, "index.faiss")
+            try:
+                faiss.write_index(self.index, index_path)
+                print(f"DEBUG: Saved FAISS index to {index_path}")
+            except Exception as e:
+                print(f"DEBUG ERROR: Failed to save FAISS index: {e}")
+            
+            # Save documents and metadata
+            docs_path = os.path.join(self.vector_store_path, "documents.pkl")
+            try:
+                with open(docs_path, "wb") as f:
+                    pickle.dump(self.documents, f)
+                print(f"DEBUG: Saved documents to {docs_path}")
+            except Exception as e:
+                print(f"DEBUG ERROR: Failed to save documents: {e}")
+            
+            meta_path = os.path.join(self.vector_store_path, "metadata.pkl")
+            try:
+                with open(meta_path, "wb") as f:
+                    pickle.dump(self.metadata, f)
+                print(f"DEBUG: Saved metadata to {meta_path}")
+            except Exception as e:
+                print(f"DEBUG ERROR: Failed to save metadata: {e}")
+        else:
+            print("DEBUG: Cannot save - index is None")
+    
+    def load_index(self):
+        """Load index from disk"""
+        index_path = os.path.join(self.vector_store_path, "index.faiss")
+        docs_path = os.path.join(self.vector_store_path, "documents.pkl")
+        meta_path = os.path.join(self.vector_store_path, "metadata.pkl")
+        
+        print(f"DEBUG: Checking for existing index at {index_path}")
+        
+        if os.path.exists(index_path):
+            try:
+                print(f"DEBUG: Loading existing index...")
+                self.index = faiss.read_index(index_path)
+                with open(docs_path, "rb") as f:
+                    self.documents = pickle.load(f)
+                with open(meta_path, "rb") as f:
+                    self.metadata = pickle.load(f)
+                print(f"DEBUG: Loaded vector store with {len(self.documents)} documents")
+            except Exception as e:
+                print(f"DEBUG ERROR: Error loading vector store: {e}")
+                self.index = None
+                self.documents = []
+                self.metadata = []
+        else:
+            print(f"DEBUG: No existing index found at {index_path}")
+    
+    def clear(self):
+        """Clear vector store"""
+        print(f"DEBUG: Clearing vector store")
+        self.index = None
+        self.documents = []
+        self.metadata = []
+        
+        # Delete saved files
+        for filename in ["index.faiss", "documents.pkl", "metadata.pkl"]:
+            filepath = os.path.join(self.vector_store_path, filename)
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                print(f"DEBUG: Removed {filepath}")
