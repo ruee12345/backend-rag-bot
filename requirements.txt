@@ -3,7 +3,7 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
-# Pydantic (compatible version)
+# Pydantic
 pydantic==2.5.0
 
 # Auth
@@ -24,11 +24,6 @@ chromadb==0.4.22
 sentence-transformers==2.2.2
 huggingface-hub==0.19.4
 numpy==1.24.3
-
-# Langchain (let pip handle core version)
-langchain==0.1.0
-langsmith==0.0.92
-langchain-text-splitters==0.0.1
 
 # PyTorch (CPU version - lighter)
 torch==2.0.1

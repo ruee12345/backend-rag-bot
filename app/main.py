@@ -4,7 +4,6 @@ import os
 
 app = FastAPI(title="HR Compliance RAG Bot")
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,7 +12,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Import routes
 try:
     from app.api import documents, rag, auth
     app.include_router(documents.router)

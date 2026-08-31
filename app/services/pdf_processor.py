@@ -1,169 +1,104 @@
+import os
 import PyPDF2
 import docx
-import os
-import re
 from typing import List, Dict, Any
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from app.core.config import settings
-
-try:
-    from pdf2image import convert_from_path
-    import pytesseract
-    HAS_OCR = True
-except ImportError:
-    HAS_OCR = False
+import re
 
 class PDFProcessor:
     def __init__(self):
-        self.chunk_size = settings.chunk_size
-        self.chunk_overlap = settings.chunk_overlap
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            length_function=len,
-        )
-    
-    def clean_extracted_text(self, text: str) -> str:
-        """Clean common PDF extraction artifacts - IMPROVED"""
-        if not text:
-            return text
-        
-        # Step 1: Replace dots patterns while preserving text structure
-        # Match patterns like "text ...................... 7" or "5.1 ......................."
-        # Replace with single space
-        text = re.sub(r'(?<=[a-zA-Z0-9])\s*\.{4,}\s*(?=[a-zA-Z0-9])', ' ', text)
-        
-        # Step 2: For dots at end of lines (page numbers, section numbers)
-        text = re.sub(r'\.{4,}\s*\d+\s*$', ' ', text, flags=re.MULTILINE)
-        
-        # Step 3: Remove remaining excessive dots (but leave single dots for decimals, periods)
-        text = re.sub(r'\.{3,}', ' ', text)
-        
-        # Step 4: Remove excessive dashes and underscores
-        text = re.sub(r'-{3,}', ' ', text)
-        text = re.sub(r'_{3,}', ' ', text)
-        
-        # Step 5: Clean up spacing
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Step 6: Remove common PDF artifacts
-        text = re.sub(r'', '', text)  # Form feed
-        text = re.sub(r'\x0c', '', text)  # Another form feed
-        
-        # Step 7: Normalize line breaks
-        text = re.sub(r'\n\s*\n', '\n\n', text)
-        
-        return text.strip()
+        pass
     
     def extract_text_from_pdf(self, file_path: str) -> str:
-        """Extract text from PDF using PyPDF2 first, fallback to OCR if needed"""
-        text = ""
-        
-        # Try PyPDF2 first (for digital PDFs)
         try:
+            text = ""
             with open(file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
-                for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    page_text = page.extract_text()
-                    if page_text.strip():  # If we got text
-                        # Clean the text
-                        page_text = self.clean_extracted_text(page_text)
-                        text += page_text + "\n\n"
-        except Exception as e:
-            print(f"PyPDF2 extraction failed: {e}")
-        
-        # If PyPDF2 got little/no text, try OCR (for scanned PDFs)
-        if len(text.strip()) < 100 and HAS_OCR:  # Less than 100 chars
-            print(f"Trying OCR for scanned PDF: {file_path}")
-            try:
-                ocr_text = self.extract_text_from_pdf_ocr(file_path)
-                if ocr_text:
-                    # Clean OCR text
-                    text = self.clean_extracted_text(ocr_text)
-                    print(f"OCR extracted {len(text)} characters")
-            except Exception as e:
-                print(f"OCR extraction failed: {e}")
-        
-        if not text.strip():
-            raise Exception("Could not extract text from PDF. File may be scanned or corrupted.")
-        
-        # Final cleaning
-        text = self.clean_extracted_text(text)
-        return text
-    
-    def extract_text_from_pdf_ocr(self, file_path: str) -> str:
-        """Extract text from scanned PDF using OCR"""
-        if not HAS_OCR:
-            raise Exception("OCR dependencies not installed. Install: pip install pdf2image pytesseract pillow")
-        
-        text = ""
-        try:
-            # Convert PDF to images
-            images = convert_from_path(file_path, dpi=300)
-            
-            # Extract text from each image using OCR
-            for i, image in enumerate(images):
-                page_text = pytesseract.image_to_string(image, lang='eng')
-                text += f"Page {i+1}:\n{page_text}\n\n"
-            
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
             return text
         except Exception as e:
-            raise Exception(f"OCR extraction error: {str(e)}")
+            print(f"Error reading PDF: {e}")
+            return ""
     
     def extract_text_from_docx(self, file_path: str) -> str:
         try:
             doc = docx.Document(file_path)
-            text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-            text = self.clean_extracted_text(text)
+            text = "\n".join([para.text for para in doc.paragraphs])
             return text
         except Exception as e:
-            raise Exception(f"Error reading DOCX: {str(e)}")
+            print(f"Error reading DOCX: {e}")
+            return ""
     
-    def extract_text_from_txt(self, file_path: str) -> str:
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                text = file.read()
-            text = self.clean_extracted_text(text)
-            return text
-        except Exception as e:
-            raise Exception(f"Error reading TXT: {str(e)}")
-    
-    def extract_text(self, file_path: str, file_type: str) -> str:
-        if file_type == 'pdf':
+    def extract_text(self, file_path: str) -> str:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == '.pdf':
             return self.extract_text_from_pdf(file_path)
-        elif file_type == 'docx':
+        elif ext == '.docx':
             return self.extract_text_from_docx(file_path)
-        elif file_type == 'txt':
-            return self.extract_text_from_txt(file_path)
         else:
-            raise ValueError(f"Unsupported file type: {file_type}")
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except:
+                return ""
     
-    def chunk_text(self, text: str) -> List[str]:
-        chunks = self.text_splitter.split_text(text)
-        # Clean each chunk
-        cleaned_chunks = [self.clean_extracted_text(chunk) for chunk in chunks]
-        return cleaned_chunks
+    def split_text(self, text: str, chunk_size: int = 500, chunk_overlap: int = 100) -> List[str]:
+        if not text:
+            return []
+        
+        paragraphs = re.split(r'\n\s*\n', text)
+        chunks = []
+        current_chunk = ""
+        
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            
+            if len(current_chunk) + len(paragraph) > chunk_size and current_chunk:
+                chunks.append(current_chunk.strip())
+                overlap_text = current_chunk[-chunk_overlap:] if chunk_overlap > 0 else ""
+                current_chunk = overlap_text + " " + paragraph
+            else:
+                if current_chunk:
+                    current_chunk += " " + paragraph
+                else:
+                    current_chunk = paragraph
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        if not chunks:
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            current_chunk = ""
+            for sentence in sentences:
+                if len(current_chunk) + len(sentence) > chunk_size:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = sentence
+                else:
+                    if current_chunk:
+                        current_chunk += " " + sentence
+                    else:
+                        current_chunk = sentence
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+        
+        return chunks
     
-    def process_document(self, file_path: str, file_type: str) -> Dict[str, Any]:
-        try:
-            text = self.extract_text(file_path, file_type)
-            chunks = self.chunk_text(text)
-            
-            chunks_with_metadata = []
-            for i, chunk in enumerate(chunks):
-                chunks_with_metadata.append({
-                    "text": chunk,
-                    "chunk_id": i,
-                    "total_chunks": len(chunks)
-                })
-            
-            return {
-                "text": text,
-                "chunks": chunks_with_metadata,
-                "total_chunks": len(chunks),
-                "total_characters": len(text)
-            }
-            
-        except Exception as e:
-            raise Exception(f"Error processing document: {str(e)}")
+    def process_document(self, file_path: str, chunk_size: int = 500, chunk_overlap: int = 100) -> List[Dict[str, Any]]:
+        text = self.extract_text(file_path)
+        if not text:
+            return []
+        
+        chunks = self.split_text(text, chunk_size, chunk_overlap)
+        
+        result = []
+        for i, chunk in enumerate(chunks):
+            result.append({
+                'text': chunk,
+                'filename': os.path.basename(file_path),
+                'chunk_id': i,
+                'source': file_path
+            })
+        
+        return result
