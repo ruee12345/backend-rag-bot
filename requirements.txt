@@ -27,4 +27,4 @@ numpy==1.24.3
 
 # PyTorch (CPU version - lighter)
 torch==2.0.1
-ollama==0.3.6
+ollama==0.5.4
