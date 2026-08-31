@@ -25,6 +25,8 @@ sentence-transformers==2.2.2
 huggingface-hub==0.19.4
 numpy==1.24.3
 
-# PyTorch (CPU version - lighter)
+# PyTorch (CPU version)
 torch==2.0.1
-ollama==0.5.4
+
+# DeepSeek API (OpenAI-compatible)
+openai==1.12.0

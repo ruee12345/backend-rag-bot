@@ -2,13 +2,19 @@ import os
 from typing import List, Dict, Any
 from app.services.vector_store import VectorStore
 from app.services.pdf_processor import PDFProcessor
-import ollama
+from openai import OpenAI
 
 class RAGService:
     def __init__(self):
         self.vector_store = VectorStore()
         self.pdf_processor = PDFProcessor()
-        self.ollama_model = os.environ.get("OLLAMA_MODEL", "llama2")
+        
+        # Initialize DeepSeek client (OpenAI-compatible)
+        self.client = OpenAI(
+            api_key=os.environ.get("DEEPSEEK_API_KEY"),
+            base_url="https://api.deepseek.com/v1"
+        )
+        self.model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
     
     def add_document(self, file_path: str) -> int:
         chunks = self.pdf_processor.process_document(file_path)
@@ -17,6 +23,7 @@ class RAGService:
         return len(chunks)
     
     def ask(self, query: str, k: int = 5) -> Dict[str, Any]:
+        # Search for relevant documents
         results = self.vector_store.search(query, k)
         
         if not results:
@@ -25,6 +32,7 @@ class RAGService:
                 "sources": []
             }
         
+        # Build context from search results
         context = "\n\n".join([result['text'] for result in results])
         sources = [
             {
@@ -36,28 +44,37 @@ class RAGService:
         ]
         
         try:
-            prompt = f"""You are an HR compliance assistant. Answer the following question based ONLY on the provided context.
-
-Context:
-{context}
-
-Question: {query}
-
-Answer:"""
-            
-            response = ollama.generate(
-                model=self.ollama_model,
-                prompt=prompt
+            # Generate answer using DeepSeek
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are an HR compliance assistant. Answer the following question based ONLY on the provided context.
+                        
+                        Rules:
+                        1. Only use information from the context provided.
+                        2. If the answer is not in the context, say "I don't have enough information to answer this."
+                        3. Be concise and professional.
+                        4. Cite specific sources when possible."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Context:\n{context}\n\nQuestion: {query}"
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=500
             )
             
             return {
-                "answer": response['response'],
+                "answer": response.choices[0].message.content,
                 "sources": sources
             }
         except Exception as e:
-            print(f"Ollama error: {e}")
+            print(f"DeepSeek error: {e}")
             return {
-                "answer": f"Error generating answer: {str(e)}. Please check if Ollama is running.",
+                "answer": f"Error generating answer: {str(e)}. Please check your DeepSeek API key.",
                 "sources": sources
             }
     
