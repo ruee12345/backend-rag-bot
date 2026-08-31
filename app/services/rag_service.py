@@ -2,18 +2,17 @@ import os
 from typing import List, Dict, Any
 from app.services.vector_store import VectorStore
 from app.services.pdf_processor import PDFProcessor
-from openai import OpenAI
+import openai
 
 class RAGService:
     def __init__(self):
         self.vector_store = VectorStore()
         self.pdf_processor = PDFProcessor()
         
-        # Initialize DeepSeek client (OpenAI-compatible)
-        self.client = OpenAI(
-            api_key=os.environ.get("DEEPSEEK_API_KEY"),
-            base_url="https://api.deepseek.com/v1"
-        )
+        # Set API key
+        openai.api_key = os.environ.get("DEEPSEEK_API_KEY")
+        openai.api_base = "https://api.deepseek.com/v1"
+        
         self.model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
     
     def add_document(self, file_path: str) -> int:
@@ -23,7 +22,6 @@ class RAGService:
         return len(chunks)
     
     def ask(self, query: str, k: int = 5) -> Dict[str, Any]:
-        # Search for relevant documents
         results = self.vector_store.search(query, k)
         
         if not results:
@@ -32,7 +30,6 @@ class RAGService:
                 "sources": []
             }
         
-        # Build context from search results
         context = "\n\n".join([result['text'] for result in results])
         sources = [
             {
@@ -44,8 +41,7 @@ class RAGService:
         ]
         
         try:
-            # Generate answer using DeepSeek
-            response = self.client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model=self.model,
                 messages=[
                     {
