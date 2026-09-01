@@ -9,11 +9,9 @@ class RAGService:
         self.vector_store = VectorStore()
         self.pdf_processor = PDFProcessor()
         
-        # Initialize Groq client
         self.client = Groq(
             api_key=os.environ.get("GROQ_API_KEY")
         )
-        # Use the correct, supported model
         self.model = os.environ.get("GROQ_MODEL", "groq/compound")
 
     def add_document(self, file_path: str) -> int:
@@ -22,7 +20,7 @@ class RAGService:
             self.vector_store.add_documents(chunks)
         return len(chunks)
     
-    def ask(self, query: str, k: int = 5) -> Dict[str, Any]:
+    def ask(self, query: str, k: int = 3) -> Dict[str, Any]:
         results = self.vector_store.search(query, k)
         
         if not results:
@@ -32,15 +30,41 @@ class RAGService:
                 "sources": []
             }
         
-        context = "\n\n".join([result['text'] for result in results])
-        sources = [
-            {
-                "text": result['text'][:200] + "...",
+        context_parts = []
+        sources = []
+        total_chars = 0
+        max_context_chars = 2000
+        
+        for result in results:
+            text = result['text']
+            if total_chars + len(text) > max_context_chars:
+                remaining = max_context_chars - total_chars
+                if remaining > 100:
+                    context_parts.append(text[:remaining] + "...")
+                    sources.append({
+                        "text": text[:200] + "...",
+                        "filename": result['filename'],
+                        "chunk_id": result['chunk_id']
+                    })
+                break
+            context_parts.append(text)
+            sources.append({
+                "text": text[:200] + "...",
                 "filename": result['filename'],
                 "chunk_id": result['chunk_id']
-            }
-            for result in results
-        ]
+            })
+            total_chars += len(text)
+        
+        if not context_parts and results:
+            text = results[0]['text']
+            context_parts.append(text[:1500])
+            sources.append({
+                "text": text[:200] + "...",
+                "filename": results[0]['filename'],
+                "chunk_id": results[0]['chunk_id']
+            })
+        
+        context = "\n\n".join(context_parts)
         
         try:
             response = self.client.chat.completions.create(
