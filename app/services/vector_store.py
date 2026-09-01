@@ -72,3 +72,14 @@ class VectorStore:
     
     def get_document_count(self) -> int:
         return self.collection.count()
+    
+    def delete_all(self):
+        self.client.delete_collection("hr_documents")
+        self.collection = self.client.create_collection("hr_documents")
+    
+    def remove_document(self, filename: str) -> bool:
+        results = self.collection.get(where={"filename": filename})
+        if results['ids']:
+            self.collection.delete(ids=results['ids'])
+            return True
+        return False
